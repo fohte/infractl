@@ -3,7 +3,7 @@ _commit: v0.9.0
 _src_path: https://github.com/fohte/generic-boilerplate
 auto_merge_release_pr: true
 binary_name: infractl
-description: '@fohte''s personal CLI for infra operations'
+description: "@fohte's personal CLI for infra operations"
 is_public: true
 project_name: infractl
 release_binary: true
