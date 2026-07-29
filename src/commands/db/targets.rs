@@ -40,8 +40,8 @@ fn format_targets(targets: &[Target]) -> String {
 
     let widths: [usize; 5] = std::array::from_fn(|i| {
         rows.iter()
-            .map(|r| r[i].len())
-            .chain(std::iter::once(COLUMN_HEADERS[i].len()))
+            .map(|r| r[i].chars().count())
+            .chain(std::iter::once(COLUMN_HEADERS[i].chars().count()))
             .max()
             .unwrap_or(0)
     });
@@ -131,6 +131,22 @@ mod tests {
                 NAME      CONTEXT    NAMESPACE  CLUSTER  DATABASE
                 mastodon  home-k8s   databases  main     mastodon
                 tq        (current)  databases  main     tq
+            "}
+        );
+    }
+
+    #[test]
+    fn format_targets_aligns_columns_for_multibyte_values() {
+        // "本番環境" is 4 chars but 12 bytes; column widths must be computed in
+        // chars to match the char-based padding `format!("{:<width$}", ..)` does,
+        // otherwise this column drifts out of alignment with the rest.
+        let targets = vec![target("tq", None, "databases", "本番環境", "tq")];
+
+        assert_eq!(
+            format_targets(&targets),
+            indoc! {"
+                NAME  CONTEXT    NAMESPACE  CLUSTER  DATABASE
+                tq    (current)  databases  本番環境     tq
             "}
         );
     }

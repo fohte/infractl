@@ -77,21 +77,30 @@ pub fn load_config_from_path(path: &Path) -> Result<Config, ConfigError> {
 mod tests {
     use super::*;
     use indoc::indoc;
+    use rstest::fixture;
+    use rstest::rstest;
     use std::fs;
     use tempfile::TempDir;
 
-    #[test]
-    fn load_config_from_path_returns_default_for_missing_file() {
+    /// A config file path inside a fresh temp directory. The `TempDir` guard
+    /// must stay alive for `path` to remain valid, so it's returned alongside.
+    #[fixture]
+    fn config_path() -> (TempDir, PathBuf) {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.yml");
+        (dir, path)
+    }
+
+    #[rstest]
+    fn load_config_from_path_returns_default_for_missing_file(config_path: (TempDir, PathBuf)) {
+        let (_dir, path) = config_path;
 
         assert_eq!(load_config_from_path(&path).unwrap(), Config::default());
     }
 
-    #[test]
-    fn load_config_from_path_parses_targets() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("config.yml");
+    #[rstest]
+    fn load_config_from_path_parses_targets(config_path: (TempDir, PathBuf)) {
+        let (_dir, path) = config_path;
         fs::write(
             &path,
             indoc! {"
@@ -138,10 +147,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn load_config_from_path_rejects_unknown_fields() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("config.yml");
+    #[rstest]
+    fn load_config_from_path_rejects_unknown_fields(config_path: (TempDir, PathBuf)) {
+        let (_dir, path) = config_path;
         fs::write(
             &path,
             indoc! {"
@@ -160,11 +168,12 @@ mod tests {
         assert!(matches!(err, ConfigError::Parse { path: err_path, .. } if err_path == path));
     }
 
-    #[test]
-    fn load_config_from_path_reports_read_error_for_unreadable_file() {
-        let dir = TempDir::new().unwrap();
+    #[rstest]
+    fn load_config_from_path_reports_read_error_for_unreadable_file(
+        config_path: (TempDir, PathBuf),
+    ) {
+        let (_dir, path) = config_path;
         // A directory can't be read as a file, forcing an io::Error that isn't NotFound.
-        let path = dir.path().join("config.yml");
         fs::create_dir(&path).unwrap();
 
         let err = load_config_from_path(&path).unwrap_err();
