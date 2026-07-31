@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/fohte/infractl/compare/v0.1.1...v0.1.2) (2026-07-31)
+
+
+### Features
+
+* **db:** add db targets command and target registry ([#11](https://github.com/fohte/infractl/issues/11)) ([d4a253e](https://github.com/fohte/infractl/commit/d4a253eb53a48f7647b7f1b3dc3daf282c74b218))
+
 ## [0.1.1](https://github.com/fohte/infractl/compare/v0.1.0...v0.1.1) (2026-07-29)
 
 
