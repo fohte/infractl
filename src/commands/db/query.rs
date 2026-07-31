@@ -37,8 +37,12 @@ pub async fn run(args: &QueryArgs) -> anyhow::Result<()> {
 
     let query_result =
         pg::run_query(&target, &password, port_forward.local_port(), &args.sql).await;
-    // Best-effort cleanup: a failure here shouldn't shadow the query result above.
-    let _ = port_forward.stop().await;
+    // A cleanup failure here shouldn't shadow the query result above, but
+    // shouldn't be silent either — surface it the same way the connection
+    // task's errors are surfaced in pg.rs.
+    if let Err(err) = port_forward.stop().await {
+        eprintln!("warning: failed to stop kubectl port-forward: {err}");
+    }
     let result_sets = query_result?;
 
     if args.json {

@@ -11,6 +11,7 @@ use tokio::process::{Child, ChildStdout, Command};
 use crate::registry::Target;
 
 const PORT_FORWARD_READY_TIMEOUT: Duration = Duration::from_secs(10);
+const SECRET_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Fetch and base64-decode the `password` field of the target's
 /// `kubernetes.io/basic-auth` Secret via `kubectl get secret -o json`.
@@ -36,9 +37,9 @@ pub async fn fetch_secret_password(target: &Target) -> anyhow::Result<String> {
         "json",
     ]);
 
-    let output = cmd
-        .output()
+    let output = tokio::time::timeout(SECRET_FETCH_TIMEOUT, cmd.output())
         .await
+        .context("timed out waiting for kubectl get secret")?
         .with_context(|| format!("failed to run kubectl get secret {}", target.secret_name))?;
     if !output.status.success() {
         anyhow::bail!(
@@ -86,7 +87,11 @@ impl PortForward {
             &target.namespace,
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::inherit())
+        // Without this, a timeout or error before `Self` is constructed
+        // (and thus before `stop()` can ever run) leaves this process
+        // running in the background, holding the local port open.
+        .kill_on_drop(true);
 
         let mut child = cmd
             .spawn()
