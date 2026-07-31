@@ -1,4 +1,5 @@
 use super::pg::ResultSet;
+use crate::commands::db::table;
 
 const NULL_DISPLAY: &str = "NULL";
 
@@ -24,7 +25,6 @@ fn format_result_set(result_set: &ResultSet) -> String {
         return "(0 rows)\n".to_string();
     }
 
-    let num_cols = result_set.columns.len();
     let rows: Vec<Vec<String>> = result_set
         .rows
         .iter()
@@ -35,45 +35,14 @@ fn format_result_set(result_set: &ResultSet) -> String {
         })
         .collect();
 
-    let widths: Vec<usize> = (0..num_cols)
-        .map(|i| {
-            rows.iter()
-                .map(|r| r[i].chars().count())
-                .chain(std::iter::once(result_set.columns[i].chars().count()))
-                .max()
-                .unwrap_or(0)
-        })
-        .collect();
-
-    let mut out = format_row(&result_set.columns, &widths);
-    out.push('\n');
-    for row in &rows {
-        out.push_str(&format_row(row, &widths));
-        out.push('\n');
-    }
-    out
-}
-
-/// Join columns with two-space gaps, padding every column but the last
-/// (which is left ragged to avoid trailing whitespace).
-fn format_row(cols: &[String], widths: &[usize]) -> String {
-    cols.iter()
-        .enumerate()
-        .map(|(i, c)| {
-            if i + 1 == cols.len() {
-                c.clone()
-            } else {
-                format!("{c:<width$}", width = widths[i])
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("  ")
+    table::render(&result_set.columns, &rows)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use indoc::indoc;
+    use rstest::rstest;
 
     fn result_set(columns: &[&str], rows: Vec<Vec<Option<&str>>>) -> ResultSet {
         ResultSet {
@@ -85,56 +54,39 @@ mod tests {
         }
     }
 
-    #[test]
-    fn format_table_empty_reports_ok() {
-        assert_eq!(format_table(&[]), "OK\n");
-    }
-
-    #[test]
-    fn format_table_renders_single_result_set() {
-        let result_sets = vec![result_set(
+    #[rstest]
+    #[case::empty(vec![], "OK\n")]
+    #[case::single_result_set(
+        vec![result_set(
             &["id", "name"],
             vec![vec![Some("1"), Some("alice")], vec![Some("2"), Some("bob")]],
-        )];
-
-        assert_eq!(
-            format_table(&result_sets),
-            indoc! {"
-                id  name
-                1   alice
-                2   bob
-            "}
-        );
-    }
-
-    #[test]
-    fn format_table_renders_null_as_literal_and_no_rows_as_message() {
-        let result_sets = vec![
+        )],
+        indoc! {"
+            id  name
+            1   alice
+            2   bob
+        "}
+    )]
+    #[case::null_and_zero_rows(
+        vec![
             result_set(&["id", "name"], vec![vec![Some("1"), None]]),
             result_set(&["id"], vec![]),
-        ];
-
-        assert_eq!(
-            format_table(&result_sets),
-            indoc! {"
-                id  name
-                1   NULL
-                (0 rows)
-            "}
-        );
-    }
-
-    #[test]
-    fn format_table_aligns_columns_for_multibyte_values() {
-        let result_sets = vec![result_set(&["cluster"], vec![vec![Some("本番環境")]])];
-
-        assert_eq!(
-            format_table(&result_sets),
-            indoc! {"
-                cluster
-                本番環境
-            "}
-        );
+        ],
+        indoc! {"
+            id  name
+            1   NULL
+            (0 rows)
+        "}
+    )]
+    #[case::multibyte(
+        vec![result_set(&["cluster"], vec![vec![Some("本番環境")]])],
+        indoc! {"
+            cluster
+            本番環境
+        "}
+    )]
+    fn test_format_table(#[case] result_sets: Vec<ResultSet>, #[case] expected: &str) {
+        assert_eq!(format_table(&result_sets), expected);
     }
 
     #[test]

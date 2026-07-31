@@ -117,10 +117,11 @@ fn collect_result_sets(messages: impl IntoIterator<Item = SimpleMessage>) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn collect_result_sets_groups_one_set_per_statement() {
-        let messages = vec![
+    #[rstest]
+    #[case::groups_one_set_per_statement(
+        vec![
             SimpleMessage::Columns(vec!["id".to_string(), "name".to_string()]),
             SimpleMessage::Row(vec![Some("1".to_string()), Some("alice".to_string())]),
             SimpleMessage::Row(vec![Some("2".to_string()), None]),
@@ -128,51 +129,40 @@ mod tests {
             SimpleMessage::Columns(vec!["total".to_string()]),
             SimpleMessage::Row(vec![Some("2".to_string())]),
             SimpleMessage::CommandComplete,
-        ];
-
-        assert_eq!(
-            collect_result_sets(messages),
-            vec![
-                ResultSet {
-                    columns: vec!["id".to_string(), "name".to_string()],
-                    rows: vec![
-                        vec![Some("1".to_string()), Some("alice".to_string())],
-                        vec![Some("2".to_string()), None],
-                    ],
-                },
-                ResultSet {
-                    columns: vec!["total".to_string()],
-                    rows: vec![vec![Some("2".to_string())]],
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn collect_result_sets_keeps_empty_row_description_as_empty_result_set() {
-        let messages = vec![
+        ],
+        vec![
+            ResultSet {
+                columns: vec!["id".to_string(), "name".to_string()],
+                rows: vec![
+                    vec![Some("1".to_string()), Some("alice".to_string())],
+                    vec![Some("2".to_string()), None],
+                ],
+            },
+            ResultSet {
+                columns: vec!["total".to_string()],
+                rows: vec![vec![Some("2".to_string())]],
+            },
+        ]
+    )]
+    #[case::keeps_empty_row_description_as_empty_result_set(
+        vec![
             SimpleMessage::Columns(vec!["id".to_string()]),
             SimpleMessage::CommandComplete,
-        ];
-
-        assert_eq!(
-            collect_result_sets(messages),
-            vec![ResultSet {
-                columns: vec!["id".to_string()],
-                rows: vec![],
-            }]
-        );
-    }
-
-    #[test]
-    fn collect_result_sets_drops_statements_without_columns_or_rows() {
-        let messages = vec![SimpleMessage::CommandComplete];
-
-        assert_eq!(collect_result_sets(messages), Vec::new());
-    }
-
-    #[test]
-    fn collect_result_sets_returns_empty_for_no_messages() {
-        assert_eq!(collect_result_sets(Vec::new()), Vec::new());
+        ],
+        vec![ResultSet {
+            columns: vec!["id".to_string()],
+            rows: vec![],
+        }]
+    )]
+    #[case::drops_statements_without_columns_or_rows(
+        vec![SimpleMessage::CommandComplete],
+        Vec::new()
+    )]
+    #[case::returns_empty_for_no_messages(Vec::new(), Vec::new())]
+    fn test_collect_result_sets(
+        #[case] messages: Vec<SimpleMessage>,
+        #[case] expected: Vec<ResultSet>,
+    ) {
+        assert_eq!(collect_result_sets(messages), expected);
     }
 }

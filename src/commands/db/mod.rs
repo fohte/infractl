@@ -1,4 +1,5 @@
 mod query;
+mod table;
 mod targets;
 
 use clap::Subcommand;

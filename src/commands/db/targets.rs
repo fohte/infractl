@@ -1,5 +1,6 @@
 use clap::Args;
 
+use crate::commands::db::table;
 use crate::{config, registry};
 use registry::Target;
 
@@ -23,10 +24,10 @@ fn format_targets(targets: &[Target]) -> String {
         return "No targets configured.\n".to_string();
     }
 
-    let rows: Vec<[String; 5]> = targets
+    let rows: Vec<Vec<String>> = targets
         .iter()
         .map(|t| {
-            [
+            vec![
                 t.name.clone(),
                 t.context
                     .clone()
@@ -38,37 +39,7 @@ fn format_targets(targets: &[Target]) -> String {
         })
         .collect();
 
-    let widths: [usize; 5] = std::array::from_fn(|i| {
-        rows.iter()
-            .map(|r| r[i].chars().count())
-            .chain(std::iter::once(COLUMN_HEADERS[i].chars().count()))
-            .max()
-            .unwrap_or(0)
-    });
-
-    let mut out = format_row(&COLUMN_HEADERS.map(String::from), &widths);
-    out.push('\n');
-    for row in &rows {
-        out.push_str(&format_row(row, &widths));
-        out.push('\n');
-    }
-    out
-}
-
-/// Join columns with two-space gaps, padding every column but the last (which
-/// is left ragged to avoid trailing whitespace).
-fn format_row(cols: &[String; 5], widths: &[usize; 5]) -> String {
-    cols.iter()
-        .enumerate()
-        .map(|(i, c)| {
-            if i + 1 == cols.len() {
-                c.clone()
-            } else {
-                format!("{c:<width$}", width = widths[i])
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("  ")
+    table::render(&COLUMN_HEADERS.map(String::from), &rows)
 }
 
 #[cfg(test)]
