@@ -8,16 +8,17 @@ use clap::Parser;
 
 use cli::{Cli, Commands};
 
-fn main() {
-    if let Err(err) = run() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    if let Err(err) = run().await {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }
 }
 
-fn run() -> anyhow::Result<()> {
+async fn run() -> anyhow::Result<()> {
     let Cli { command } = Cli::parse();
     match command {
-        Commands::Db(db) => db.run(),
+        Commands::Db(db) => db.run().await,
     }
 }
