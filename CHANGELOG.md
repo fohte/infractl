@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/fohte/infractl/compare/v0.1.2...v0.1.3) (2026-08-01)
+
+
+### Features
+
+* **db:** add db query command ([#17](https://github.com/fohte/infractl/issues/17)) ([cdcf25d](https://github.com/fohte/infractl/commit/cdcf25d0bd28dfbafd897b8a4779c47e5af89e7b))
+
 ## [0.1.2](https://github.com/fohte/infractl/compare/v0.1.1...v0.1.2) (2026-07-31)
 
 
