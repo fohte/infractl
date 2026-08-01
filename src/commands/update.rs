@@ -57,8 +57,9 @@ fn update_last_check_time() {
 
 /// Automatically check for updates and apply if available.
 /// Only checks once per `CHECK_INTERVAL_SECS` (cached via `last_check_path`).
-/// Runs in a separate blocking thread because `self_update` creates its own
-/// tokio runtime internally, which cannot nest inside the caller's runtime.
+/// Runs in a separate blocking thread because the `reqwest::blocking` client
+/// `self_update` uses internally panics if invoked from inside a tokio
+/// runtime; `spawn_blocking` moves it off the runtime thread.
 pub async fn auto_update() {
     if !should_check_for_update() {
         return;
@@ -121,13 +122,17 @@ fn base_update_builder() -> self_update::backends::github::UpdateBuilder {
     builder
 }
 
-fn do_update_silent() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn execute_update(show_progress: bool) -> anyhow::Result<self_update::Status> {
     let mut builder = base_update_builder();
-    let status = builder
-        .show_download_progress(false)
+    Ok(builder
+        .show_download_progress(show_progress)
         .no_confirm(true)
         .build()?
-        .update()?;
+        .update()?)
+}
+
+fn do_update_silent() -> anyhow::Result<()> {
+    let status = execute_update(false)?;
 
     if status.updated() {
         eprintln!("Updated to version {}.", status.version());
@@ -136,21 +141,21 @@ fn do_update_silent() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-pub fn run() -> anyhow::Result<()> {
-    let mut builder = base_update_builder();
-    let status = builder
-        .show_download_progress(true)
-        .no_confirm(true)
-        .build()?
-        .update()?;
+/// Runs the blocking update on a separate thread for the same reason
+/// `auto_update` does — see its doc comment.
+pub async fn run() -> anyhow::Result<()> {
+    tokio::task::spawn_blocking(|| {
+        let status = execute_update(true)?;
 
-    if status.updated() {
-        println!("Updated to version {}!", status.version());
-    } else {
-        println!("Already up to date (version {}).", status.version());
-    }
+        if status.updated() {
+            println!("Updated to version {}!", status.version());
+        } else {
+            println!("Already up to date (version {}).", status.version());
+        }
 
-    Ok(())
+        Ok(())
+    })
+    .await?
 }
 
 #[cfg(test)]

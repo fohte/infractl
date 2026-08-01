@@ -5,30 +5,28 @@ fn home_dir() -> Option<PathBuf> {
     non_empty_env("HOME").map(PathBuf::from)
 }
 
-/// Returns the XDG config directory (`$XDG_CONFIG_HOME`, falling back to `$HOME/.config`).
-/// Empty or relative values are treated as unset per the XDG Base Directory
-/// Specification, which requires these paths to be absolute.
-pub fn config_dir() -> Option<PathBuf> {
-    if let Some(xdg) = non_empty_env("XDG_CONFIG_HOME") {
+/// Resolves an XDG base directory: `$<env_key>` if set to an absolute path,
+/// otherwise `$HOME/<fallback_subdir>`. Empty or relative values are treated
+/// as unset per the XDG Base Directory Specification, which requires these
+/// paths to be absolute.
+fn xdg_dir(env_key: &str, fallback_subdir: &str) -> Option<PathBuf> {
+    if let Some(xdg) = non_empty_env(env_key) {
         let path = PathBuf::from(xdg);
         if path.is_absolute() {
             return Some(path);
         }
     }
-    home_dir().map(|home| home.join(".config"))
+    home_dir().map(|home| home.join(fallback_subdir))
+}
+
+/// Returns the XDG config directory (`$XDG_CONFIG_HOME`, falling back to `$HOME/.config`).
+pub fn config_dir() -> Option<PathBuf> {
+    xdg_dir("XDG_CONFIG_HOME", ".config")
 }
 
 /// Returns the XDG cache directory (`$XDG_CACHE_HOME`, falling back to `$HOME/.cache`).
-/// Empty or relative values are treated as unset per the XDG Base Directory
-/// Specification, which requires these paths to be absolute.
 pub fn cache_dir() -> Option<PathBuf> {
-    if let Some(xdg) = non_empty_env("XDG_CACHE_HOME") {
-        let path = PathBuf::from(xdg);
-        if path.is_absolute() {
-            return Some(path);
-        }
-    }
-    home_dir().map(|home| home.join(".cache"))
+    xdg_dir("XDG_CACHE_HOME", ".cache")
 }
 
 /// Returns the value of an environment variable, treating empty strings as unset.

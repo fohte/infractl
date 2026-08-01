@@ -26,6 +26,6 @@ async fn run() -> anyhow::Result<()> {
 
     match command {
         Commands::Db(db) => db.run().await,
-        Commands::Update => commands::update::run(),
+        Commands::Update => commands::update::run().await,
     }
 }
