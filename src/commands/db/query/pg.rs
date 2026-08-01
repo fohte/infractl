@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use serde::Serialize;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_postgres::{Config, NoTls, SimpleQueryMessage};
 
 use crate::registry::Target;
@@ -17,33 +18,39 @@ pub struct ResultSet {
     pub rows: Vec<Vec<Option<String>>>,
 }
 
-/// Connect as the target's reader role, apply the read-only / statement
-/// timeout session guards, and run `sql` via the simple query protocol.
+/// Speak the Postgres wire protocol over `stream` as the target's reader role,
+/// apply the read-only / statement timeout session guards, and run `sql` via
+/// the simple query protocol.
 ///
 /// The simple query protocol returns every column as text and allows
 /// multiple `;`-separated statements. Both traits are fine here:
 /// `infractl_reader` only has `pg_read_all_data`, so there's nothing an
 /// extra statement could write, and returning text avoids having to map
 /// every Postgres type to a display string ourselves.
-pub async fn run_query(
+pub async fn run_query<S>(
+    stream: S,
     target: &Target,
     password: &str,
-    local_port: u16,
     sql: &str,
-) -> anyhow::Result<Vec<ResultSet>> {
+) -> anyhow::Result<Vec<ResultSet>>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let mut config = Config::new();
+    // `connect_raw` only reads user / password / dbname / options /
+    // application_name off the config; host and port are the stream's business.
     config
-        .host("127.0.0.1")
-        .port(local_port)
         .user(target.user.as_str())
         .password(password)
-        .dbname(target.database.as_str())
-        .connect_timeout(CONNECT_TIMEOUT);
+        .dbname(target.database.as_str());
 
-    let (client, connection) = config
-        .connect(NoTls)
-        .await
-        .with_context(|| format!("failed to connect to target {:?}", target.name))?;
+    // `connect_timeout` is one of the settings `connect_raw` ignores, so the
+    // handshake needs its own bound.
+    let (client, connection) =
+        tokio::time::timeout(CONNECT_TIMEOUT, config.connect_raw(stream, NoTls))
+            .await
+            .with_context(|| format!("timed out connecting to target {:?}", target.name))?
+            .with_context(|| format!("failed to connect to target {:?}", target.name))?;
 
     tokio::spawn(async move {
         if let Err(err) = connection.await {

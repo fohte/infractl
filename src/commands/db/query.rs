@@ -32,17 +32,13 @@ pub async fn run(args: &QueryArgs) -> anyhow::Result<()> {
         )
     })?;
 
-    let password = kube::fetch_secret_password(&target).await?;
-    let port_forward = kube::PortForward::start(&target).await?;
+    let client = kube::client(&target).await?;
+    let password = kube::fetch_secret_password(&client, &target).await?;
+    let mut port_forward = kube::open_port_forward(&client, &target).await?;
+    let stream = kube::take_postgres_stream(&mut port_forward)?;
 
-    let query_result =
-        pg::run_query(&target, &password, port_forward.local_port(), &args.sql).await;
-    // A cleanup failure here shouldn't shadow the query result above, but
-    // shouldn't be silent either — surface it the same way the connection
-    // task's errors are surfaced in pg.rs.
-    if let Err(err) = port_forward.stop().await {
-        eprintln!("warning: failed to stop kubectl port-forward: {err}");
-    }
+    let query_result = pg::run_query(stream, &target, &password, &args.sql).await;
+    port_forward.abort();
     let result_sets = query_result?;
 
     if args.json {

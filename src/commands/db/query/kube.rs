@@ -1,168 +1,105 @@
-use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::Context;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, BufReader, Lines};
-use tokio::process::{Child, ChildStdout, Command};
+use k8s_openapi::api::core::v1::{Pod, Secret};
+use kube::api::{Api, ListParams, Portforwarder};
+use kube::config::KubeConfigOptions;
+use kube::{Client, Config};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::registry::Target;
 
-const PORT_FORWARD_READY_TIMEOUT: Duration = Duration::from_secs(10);
-const SECRET_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Port a CloudNativePG instance pod serves Postgres on.
+const POSTGRES_PORT: u16 = 5432;
 
-/// Fetch and base64-decode the `password` field of the target's
-/// `kubernetes.io/basic-auth` Secret via `kubectl get secret -o json`.
-pub async fn fetch_secret_password(target: &Target) -> anyhow::Result<String> {
-    #[derive(Deserialize)]
-    struct SecretResponse {
-        data: SecretData,
-    }
+const API_TIMEOUT: Duration = Duration::from_secs(10);
 
-    #[derive(Deserialize)]
-    struct SecretData {
-        password: String,
-    }
-
-    let mut cmd = kubectl_command(target);
-    cmd.args([
-        "get",
-        "secret",
-        &target.secret_name,
-        "-n",
-        &target.namespace,
-        "-o",
-        "json",
-    ]);
-
-    let output = tokio::time::timeout(SECRET_FETCH_TIMEOUT, cmd.output())
+/// Build a client for the target's kube context, or the kubeconfig's
+/// current-context when the target doesn't pin one.
+pub async fn client(target: &Target) -> anyhow::Result<Client> {
+    let options = KubeConfigOptions {
+        context: target.context.clone(),
+        ..Default::default()
+    };
+    let config = Config::from_kubeconfig(&options)
         .await
-        .context("timed out waiting for kubectl get secret")?
-        .with_context(|| format!("failed to run kubectl get secret {}", target.secret_name))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "kubectl get secret {} failed: {}",
-            target.secret_name,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
+        .context("failed to load kubeconfig")?;
 
-    let secret: SecretResponse = serde_json::from_slice(&output.stdout).with_context(|| {
-        format!(
-            "failed to parse kubectl get secret {} output",
-            target.secret_name
-        )
-    })?;
-
-    let decoded = BASE64
-        .decode(secret.data.password)
-        .context("failed to base64-decode secret password")?;
-
-    String::from_utf8(decoded).context("secret password is not valid UTF-8")
+    Client::try_from(config).context("failed to build a kubernetes client")
 }
 
-/// A live `kubectl port-forward` subprocess tunnelling a local TCP port to
-/// the target cluster's `-rw` service.
-pub struct PortForward {
-    child: Child,
-    local_port: u16,
-    // Keeps kubectl's stdout drained for the tunnel's whole lifetime. Once
-    // the readiness line is found, nothing reads this pipe anymore unless
-    // kept open here; letting it fill up (or dropping it, which closes our
-    // read end) has been observed to break the proxied connection outright
-    // rather than just losing log output.
-    stdout_drain: tokio::task::JoinHandle<()>,
+/// Fetch the `password` field of the target's `kubernetes.io/basic-auth`
+/// Secret, which holds the reader role's password.
+pub async fn fetch_secret_password(client: &Client, target: &Target) -> anyhow::Result<String> {
+    let secrets: Api<Secret> = Api::namespaced(client.clone(), &target.namespace);
+
+    let secret = tokio::time::timeout(API_TIMEOUT, secrets.get(&target.secret_name))
+        .await
+        .context("timed out fetching the reader role's secret")?
+        .with_context(|| format!("failed to get secret {}", target.secret_name))?;
+
+    let password = secret
+        .data
+        .unwrap_or_default()
+        .remove("password")
+        .with_context(|| format!("secret {} has no password field", target.secret_name))?;
+
+    String::from_utf8(password.0).context("secret password is not valid UTF-8")
 }
 
-impl PortForward {
-    pub async fn start(target: &Target) -> anyhow::Result<Self> {
-        let mut cmd = kubectl_command(target);
-        cmd.args([
-            "port-forward",
-            &format!("svc/{}-rw", target.cluster),
-            ":5432",
-            "-n",
-            &target.namespace,
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        // Without this, a timeout or error before `Self` is constructed
-        // (and thus before `stop()` can ever run) leaves this process
-        // running in the background, holding the local port open.
-        .kill_on_drop(true);
+/// Open a port-forward tunnel to the target cluster's primary instance pod.
+///
+/// The caller drives the tunnel by taking its stream with
+/// [`take_postgres_stream`]; the returned handle owns the background task and
+/// must outlive that stream.
+pub async fn open_port_forward(client: &Client, target: &Target) -> anyhow::Result<Portforwarder> {
+    let pod = find_primary_pod(client, target).await?;
+    let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
 
-        let mut child = cmd
-            .spawn()
-            .context("failed to spawn kubectl port-forward")?;
-        let stdout = child
-            .stdout
-            .take()
-            .context("kubectl port-forward stdout was not piped")?;
-        let mut lines = BufReader::new(stdout).lines();
-
-        let local_port = tokio::time::timeout(
-            PORT_FORWARD_READY_TIMEOUT,
-            wait_for_forwarded_port(&mut lines),
-        )
+    tokio::time::timeout(API_TIMEOUT, pods.portforward(&pod, &[POSTGRES_PORT]))
         .await
-        .context("timed out waiting for kubectl port-forward to open a tunnel")??;
+        .context("timed out opening a port-forward tunnel")?
+        .with_context(|| format!("failed to port-forward to pod {pod}"))
+}
 
-        let stdout_drain =
-            tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
+/// Take the Postgres byte stream out of a tunnel opened by
+/// [`open_port_forward`]. Yields at most one stream per tunnel.
+///
+/// The stream is the API server's tunnel itself rather than a socket to a
+/// locally bound port, so nothing listens on loopback while it is in use.
+pub fn take_postgres_stream(
+    forwarder: &mut Portforwarder,
+) -> anyhow::Result<impl AsyncRead + AsyncWrite + Unpin + Send + use<>> {
+    forwarder
+        .take_stream(POSTGRES_PORT)
+        .context("port-forward tunnel exposed no stream for the Postgres port")
+}
 
-        Ok(Self {
-            child,
-            local_port,
-            stdout_drain,
+async fn find_primary_pod(client: &Client, target: &Target) -> anyhow::Result<String> {
+    let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
+    let params = ListParams::default().labels(&primary_pod_selector(&target.cluster));
+
+    let list = tokio::time::timeout(API_TIMEOUT, pods.list(&params))
+        .await
+        .context("timed out listing the cluster's instance pods")?
+        .with_context(|| format!("failed to list pods for cluster {}", target.cluster))?;
+
+    // CloudNativePG demotes the old primary before promoting a new one, so the
+    // selector matches at most one pod even mid-failover.
+    list.items
+        .into_iter()
+        .find_map(|pod| pod.metadata.name)
+        .with_context(|| {
+            format!(
+                "no primary pod found for cluster {} in namespace {}",
+                target.cluster, target.namespace
+            )
         })
-    }
-
-    pub fn local_port(&self) -> u16 {
-        self.local_port
-    }
-
-    /// Terminate the port-forward subprocess and wait for it to be reaped.
-    pub async fn stop(mut self) -> anyhow::Result<()> {
-        self.stdout_drain.abort();
-        self.child
-            .kill()
-            .await
-            .context("failed to stop kubectl port-forward")
-    }
 }
 
-async fn wait_for_forwarded_port(lines: &mut Lines<BufReader<ChildStdout>>) -> anyhow::Result<u16> {
-    while let Some(line) = lines
-        .next_line()
-        .await
-        .context("failed to read kubectl port-forward output")?
-    {
-        if let Some(port) = parse_forwarded_port(&line) {
-            return Ok(port);
-        }
-    }
-    anyhow::bail!("kubectl port-forward exited before opening a tunnel")
-}
-
-/// Parses the local port out of a `kubectl port-forward` readiness line,
-/// e.g. `Forwarding from 127.0.0.1:63421 -> 5432`. This isn't a documented
-/// kubectl contract, but the format has been stable across versions.
-fn parse_forwarded_port(line: &str) -> Option<u16> {
-    line.strip_prefix("Forwarding from 127.0.0.1:")?
-        .split(" -> ")
-        .next()?
-        .parse()
-        .ok()
-}
-
-fn kubectl_command(target: &Target) -> Command {
-    let mut cmd = Command::new("kubectl");
-    if let Some(context) = &target.context {
-        cmd.args(["--context", context]);
-    }
-    cmd
+/// Selects the instance pod CloudNativePG currently promotes as primary.
+fn primary_pod_selector(cluster: &str) -> String {
+    format!("cnpg.io/cluster={cluster},cnpg.io/instanceRole=primary")
 }
 
 #[cfg(test)]
@@ -171,11 +108,12 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[case::ipv4("Forwarding from 127.0.0.1:63421 -> 5432", Some(63421))]
-    #[case::ipv6_line_ignored("Forwarding from [::1]:63421 -> 5432", None)]
-    #[case::unrelated_line("Handling connection for 5432", None)]
-    #[case::empty_line("", None)]
-    fn test_parse_forwarded_port(#[case] line: &str, #[case] expected: Option<u16>) {
-        assert_eq!(parse_forwarded_port(line), expected);
+    #[case::plain("main", "cnpg.io/cluster=main,cnpg.io/instanceRole=primary")]
+    #[case::hyphenated(
+        "main-staging",
+        "cnpg.io/cluster=main-staging,cnpg.io/instanceRole=primary"
+    )]
+    fn test_primary_pod_selector(#[case] cluster: &str, #[case] expected: &str) {
+        assert_eq!(primary_pod_selector(cluster), expected);
     }
 }
