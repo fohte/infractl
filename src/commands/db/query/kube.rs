@@ -47,32 +47,36 @@ pub async fn fetch_secret_password(client: &Client, target: &Target) -> anyhow::
     String::from_utf8(password.0).context("secret password is not valid UTF-8")
 }
 
-/// Open a port-forward tunnel to the target cluster's primary instance pod.
+/// Open a port-forward tunnel to the target cluster's primary instance pod and
+/// take the Postgres stream out of it.
 ///
-/// The caller drives the tunnel by taking its stream with
-/// [`take_postgres_stream`]; the returned handle owns the background task and
-/// must outlive that stream.
-pub async fn open_port_forward(client: &Client, target: &Target) -> anyhow::Result<Portforwarder> {
-    let pod = find_primary_pod(client, target).await?;
-    let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
-
-    tokio::time::timeout(API_TIMEOUT, pods.portforward(&pod, &[POSTGRES_PORT]))
-        .await
-        .context("timed out opening a port-forward tunnel")?
-        .with_context(|| format!("failed to port-forward to pod {pod}"))
-}
-
-/// Take the Postgres byte stream out of a tunnel opened by
-/// [`open_port_forward`]. Yields at most one stream per tunnel.
+/// The returned handle owns the background task feeding the stream, so it has
+/// to outlive the stream and be aborted once the stream is done with. Handing
+/// out both at once keeps that cleanup obligation from starting before the
+/// stream is in the caller's hands.
 ///
 /// The stream is the API server's tunnel itself rather than a socket to a
 /// locally bound port, so nothing listens on loopback while it is in use.
-pub fn take_postgres_stream(
-    forwarder: &mut Portforwarder,
-) -> anyhow::Result<impl AsyncRead + AsyncWrite + Unpin + Send + use<>> {
-    forwarder
+pub async fn open_postgres_tunnel(
+    client: &Client,
+    target: &Target,
+) -> anyhow::Result<(
+    Portforwarder,
+    impl AsyncRead + AsyncWrite + Unpin + Send + use<>,
+)> {
+    let pod = find_primary_pod(client, target).await?;
+    let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
+
+    let mut forwarder = tokio::time::timeout(API_TIMEOUT, pods.portforward(&pod, &[POSTGRES_PORT]))
+        .await
+        .context("timed out opening a port-forward tunnel")?
+        .with_context(|| format!("failed to port-forward to pod {pod}"))?;
+
+    let stream = forwarder
         .take_stream(POSTGRES_PORT)
-        .context("port-forward tunnel exposed no stream for the Postgres port")
+        .context("port-forward tunnel exposed no stream for the Postgres port")?;
+
+    Ok((forwarder, stream))
 }
 
 async fn find_primary_pod(client: &Client, target: &Target) -> anyhow::Result<String> {

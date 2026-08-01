@@ -34,8 +34,7 @@ pub async fn run(args: &QueryArgs) -> anyhow::Result<()> {
 
     let client = kube::client(&target).await?;
     let password = kube::fetch_secret_password(&client, &target).await?;
-    let mut port_forward = kube::open_port_forward(&client, &target).await?;
-    let stream = kube::take_postgres_stream(&mut port_forward)?;
+    let (port_forward, stream) = kube::open_postgres_tunnel(&client, &target).await?;
 
     let query_result = pg::run_query(stream, &target, &password, &args.sql).await;
     port_forward.abort();
