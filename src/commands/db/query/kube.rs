@@ -64,8 +64,8 @@ pub async fn open_postgres_tunnel(
     Portforwarder,
     impl AsyncRead + AsyncWrite + Unpin + Send + use<>,
 )> {
-    let pod = find_primary_pod(client, target).await?;
     let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
+    let pod = find_primary_pod(&pods, target).await?;
 
     let mut forwarder = tokio::time::timeout(API_TIMEOUT, pods.portforward(&pod, &[POSTGRES_PORT]))
         .await
@@ -79,8 +79,7 @@ pub async fn open_postgres_tunnel(
     Ok((forwarder, stream))
 }
 
-async fn find_primary_pod(client: &Client, target: &Target) -> anyhow::Result<String> {
-    let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
+async fn find_primary_pod(pods: &Api<Pod>, target: &Target) -> anyhow::Result<String> {
     let params = ListParams::default().labels(&primary_pod_selector(&target.cluster));
 
     let list = tokio::time::timeout(API_TIMEOUT, pods.list(&params))
