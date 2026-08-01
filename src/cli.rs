@@ -19,4 +19,6 @@ pub enum Commands {
     /// Query CloudNativePG-managed Postgres clusters
     #[command(subcommand)]
     Db(DbCommands),
+    /// Update infractl to the latest release
+    Update,
 }
