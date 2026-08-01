@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/fohte/infractl/compare/v0.1.3...v0.1.4) (2026-08-01)
+
+
+### Features
+
+* **update:** add infractl update command and startup auto-update check ([#22](https://github.com/fohte/infractl/issues/22)) ([1e15afa](https://github.com/fohte/infractl/commit/1e15afa8b5636955bdcc125582f1eb16207d0814))
+
 ## [0.1.3](https://github.com/fohte/infractl/compare/v0.1.2...v0.1.3) (2026-08-01)
 
 
