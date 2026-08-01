@@ -36,13 +36,6 @@ impl Target {
 }
 
 /// Resolve a single target by name.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "not called until `infractl db query` is implemented"
-    )
-)]
 pub fn resolve(config: &Config, name: &str) -> Option<Target> {
     config
         .targets
