@@ -17,7 +17,7 @@ self_update = { version = "=0.44.0", features = ["reqwest", "rustls", "compressi
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 serde_yaml = "=0.9.34"
-thiserror = "=2.0.19"
+thiserror = "=2.0.20"
 tokio = { version = "=1.53.1", features = ["macros", "rt", "time"] }
 tokio-postgres = "=0.7.18"
 
