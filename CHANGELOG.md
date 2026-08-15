@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/fohte/infractl/compare/v0.1.6...v0.1.7) (2026-08-15)
+
+
+### Dependencies
+
+* update rust crate thiserror to v2.0.20 ([#45](https://github.com/fohte/infractl/issues/45)) ([fc795b8](https://github.com/fohte/infractl/commit/fc795b8a90226ecb280c65ae233f93faca94445b))
+
 ## [0.1.6](https://github.com/fohte/infractl/compare/v0.1.5...v0.1.6) (2026-08-13)
 
 
