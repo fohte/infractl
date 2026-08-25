@@ -8,7 +8,7 @@ is_public: true
 project_name: infractl
 release_binary: true
 release_type: rust
-repo_id: ''
+repo_id: '1316143821'
 repo_language: ja
 subpackages: []
 type: rust
