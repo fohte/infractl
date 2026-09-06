@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/fohte/infractl/compare/v0.1.7...v0.1.8) (2026-09-06)
+
+
+### Dependencies
+
+* update rust to v1.98.0 ([#77](https://github.com/fohte/infractl/issues/77)) ([e191965](https://github.com/fohte/infractl/commit/e19196500482280114c5bd131af42df4d33f47f4))
+
 ## [0.1.7](https://github.com/fohte/infractl/compare/v0.1.6...v0.1.7) (2026-08-15)
 
 
