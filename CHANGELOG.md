@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/fohte/infractl/compare/v0.1.9...v0.1.10) (2026-09-22)
+
+
+### Dependencies
+
+* update rust crate clap to v4.6.7 ([#108](https://github.com/fohte/infractl/issues/108)) ([fdacf5f](https://github.com/fohte/infractl/commit/fdacf5f5d888b59bf0115c169bb90d725a12de69))
+
 ## [0.1.9](https://github.com/fohte/infractl/compare/v0.1.8...v0.1.9) (2026-09-10)
 
 
